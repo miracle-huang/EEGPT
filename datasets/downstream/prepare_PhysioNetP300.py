@@ -3,7 +3,7 @@ import torch
 import os
 import mne
 
-dataset_fold = "PhysioNetP300/"
+dataset_fold = "D:/huangzhiying/EEGPT/EEGPT/datasets/datasets/PhysioNetP300/finish_prepared_data"
 
 
 all_chans = ['Fp1', 'AF7', 'AF3', 'F1', 'F3', 'F5', 'F7', 'FT7', 'FC5', 'FC3', 'FC1', 'C1', 'C3', 'C5', 'T7', 'TP7', 'CP5', 'CP3', 'CP1', 'P1', 'P3', 'P5', 'P7', 'P9', 'PO7', 'PO3', 'O1', 'Iz', 'Oz', 'POz', 'Pz', 'CPz', 'Fpz', 'Fp2', 'AF8', 'AF4', 'AFz', 'Fz', 'F2', 'F4', 'F6', 'F8', 'FT8', 'FC6', 'FC4', 'FC2', 'FCz', 'Cz', 'C2', 'C4', 'C6', 'T8', 'TP8', 'CP6', 'CP4', 'CP2', 'P2', 'P4', 'P6', 'P8', 'P10', 'PO8', 'PO4', 'O2']
@@ -16,8 +16,8 @@ fmax=120
 tmin=-0.1
 tmax=2
 for sub in [2,3,4,5,6,7,9,11]:
-
-    path = "erp-based-brain-computer-interface-recordings-1.0.0/files/s{:02d}".format(sub)
+    # path = "erp-based-brain-computer-interface-recordings-1.0.0/files/s{:02d}".format(sub)
+    path = "D:/huangzhiying/EEGPT/EEGPT/datasets/datasets/PhysioNetP300/files/s{:02d}".format(sub)
     for file in os.listdir(path):
         if not file.endswith(".edf"):continue
         raw = mne.io.read_raw_edf(os.path.join(path, file)) # 读取edf文件
@@ -72,7 +72,11 @@ for sub in [2,3,4,5,6,7,9,11]:
             # -- save
             x = torch.tensor(d*1e3)
             y = label
-            spath = dataset_fold+f'{y}/'
-            os.makedirs(path,exist_ok=True)
+            spath = dataset_fold+f'/{y}/'
+            directory = os.path.dirname(spath)
+            print("dataset_fold:",dataset_fold)
+            print("spath:",spath)
+            if not os.path.exists(directory):
+                os.makedirs(path,exist_ok=True)
             spath = spath + f'{i}.sub{sub}'
             torch.save(x, spath)
