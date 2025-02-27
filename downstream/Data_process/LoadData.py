@@ -16,6 +16,7 @@ class LoadData:
         self.raw_eeg_subject = None
 
     def load_raw_data_gdf(self, file_to_load):
+        # 加载 GDF 格式的 EEG（脑电）数据，并将其存储在 self.raw_eeg_subject 变量中。
         self.raw_eeg_subject = mne.io.read_raw_gdf(self.eeg_file_path + '/' + file_to_load)
         return self
 
@@ -40,31 +41,58 @@ class LoadBCIC(LoadData):
         super(LoadBCIC, self).__init__(*args)
 
     def get_epochs(self, tmin=-4.5, tmax=5.0, bandpass = None,resample = None,baseline=None,reject = False):
-        
+        '''
+        tmin	Epoch 开始时间（相对于事件触发时间），默认 -4.5 秒
+        tmax	Epoch 结束时间，默认 5.0 秒
+        bandpass	带通滤波的频率范围，例如 [1, 40] 代表 1-40Hz
+        resample	目标采样率，若设定则进行重采样
+        baseline	基线校正范围，如 (None, 0) 代表从 tmin 到 0s 进行校正
+        reject	是否去除某些事件（如眨眼伪影），默认为 False
+        '''
+
+        # 加载 EEG 原始数据
         self.load_raw_data_gdf(self.file_to_load)
-        raw_data = self.raw_eeg_subject
+        raw_data = self.raw_eeg_subject # raw_data 现在存储了 MNE Raw 对象，即原始 EEG 数据
+
+        # 提取事件信息
+        # events：一个 (N, 3) 的数组，每行包含 [时间点, 0, 事件 ID]。
+        # event_ids：一个字典，键是事件名称（字符串），值是对应的 ID（整数）
         events, event_ids = mne.events_from_annotations(raw_data)
-        self.fs = raw_data.info.get('sfreq')
+        self.fs = raw_data.info.get('sfreq') # 获取采样频率
+
+        # 如果 reject 为 True，则去除眨眼伪影事件
         if reject == True:
-            reject_events = mne.pick_events(events,[1])
-            reject_oneset = reject_events[:,0]/self.fs
-            duration = [4]*len(reject_events)
-            descriptions = ['bad trial']*len(reject_events)
-            blink_annot = mne.Annotations(reject_oneset,duration,descriptions)
-            raw_data.set_annotations(blink_annot)
+            reject_events = mne.pick_events(events,[1]) # 选取事件 ID 为 1 的事件
+            reject_oneset = reject_events[:,0]/self.fs # 计算事件发生的时间点（秒）
+            duration = [4]*len(reject_events) # 每个事件的持续时间 4s
+            descriptions = ['bad trial']*len(reject_events) # 标记为“bad trial”
+            blink_annot = mne.Annotations(reject_oneset,duration,descriptions) # 创建 MNE 注释
+            raw_data.set_annotations(blink_annot) # 应用标注(将其标记为无效数据)
         
+        # 提取 epochs
+        # stims 选择需要的刺激事件（stimcodes 指定的事件）
         stims =[value for key, value in event_ids.items() if key in self.stimcodes]
+        '''
+        tmin=-4.5, tmax=5.0：截取事件前 4.5s 到后 5s 的 EEG 数据。
+        event_repeated='drop'：去除重复事件。
+        baseline=baseline：基线校正（如 None, 0 代表使用 tmin 到 0s 作为基线）。
+        preload=True：加载数据到内存，方便后续处理。
+        reject_by_annotation=True：丢弃标记为 “bad trial” 的 epoch。
+        '''
         epochs = mne.Epochs(raw_data, events, event_id=stims, tmin=tmin, tmax=tmax, event_repeated='drop',
                             baseline=baseline, preload=True, proj=False, reject_by_annotation=True)
+        
+        # 过滤 & 重采样
         if bandpass is not None:
-            epochs.filter(bandpass[0],bandpass[1],method = 'iir')
+            epochs.filter(bandpass[0],bandpass[1],method = 'iir') # 带通滤波（如 bandpass=[1, 40]）：保留 1Hz 到 40Hz 的 EEG 成分。
             # epochs.resample(128)
         if resample is not None:
-            epochs.resample(resample)
+            epochs.resample(resample) # 重采样（如 resample=128）：降低数据采样率，提高计算效率
 
+        # 删除不需要的通道
         epochs = epochs.drop_channels(self.channels_to_remove)
-        self.y_labels = epochs.events[:, -1] - min(epochs.events[:, -1])
-        self.x_data = epochs.get_data()*1e6
+        self.y_labels = epochs.events[:, -1] - min(epochs.events[:, -1]) # 取出所有 epoch 的事件 ID 作为标签, 使标签从 0 开始。
+        self.x_data = epochs.get_data()*1e6 # 乘以 1e6，将数据转换为 μV
         # length = len(self.x_data)
         eeg_data={'x_data': self.x_data,
                   'y_labels': self.y_labels,

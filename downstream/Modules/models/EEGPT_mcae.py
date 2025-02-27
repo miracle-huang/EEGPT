@@ -647,25 +647,25 @@ class EEGTransformer(nn.Module):
     """ EEG Transformer """
     def __init__(
         self,
-        img_size=(64,1000),
-        patch_size=64,
-        patch_stride=None,
-        embed_dim=768,
-        embed_num=1,
-        predictor_embed_dim=384,
-        depth=12,
-        predictor_depth=12,
-        num_heads=12,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        drop_rate=0.0,
-        attn_drop_rate=0.0,
-        drop_path_rate=0.0,
-        norm_layer=nn.LayerNorm,
-        patch_module=PatchEmbed,# PatchNormEmbed
-        init_std=0.02,
-        interpolate_factor = 2.,
-        return_attention_layer=-1,
+        img_size=(64,1000), # 输入数据的尺寸，默认为 (64, 1000)，表示 64 个通道和 1000 个时间点。
+        patch_size=64, # 每个 patch 的大小，默认为 64。
+        patch_stride=None, # patch 的步长，默认为 None。
+        embed_dim=768, # 嵌入维度，默认为 768
+        embed_num=1, # 嵌入数量，默认为 1
+        predictor_embed_dim=384, # 预测器的嵌入维度，默认为 384
+        depth=12, # Transformer的层数，默认为 12
+        predictor_depth=12, # 预测器的层数，默认为 12
+        num_heads=12, # 多头注意力机制的头数，默认为 12
+        mlp_ratio=4.0, #MLP（多层感知机）的隐藏层维度与嵌入维度的比例，默认为 4.0
+        qkv_bias=True, # 是否在 QKV 线性变换中使用偏置，默认为 True
+        drop_rate=0.0, # Dropout 概率，默认为 0.0
+        attn_drop_rate=0.0, # 注意力 Dropout
+        drop_path_rate=0.0, # Stochastic Depth 概率，默认为 0.0
+        norm_layer=nn.LayerNorm, # 归一化层，默认为 nn.LayerNorm
+        patch_module=PatchEmbed, # PatchNormEmbed Patch 嵌入模块，默认为 PatchEmbed
+        init_std=0.02, # 初始化标准差，默认为 0.02
+        interpolate_factor = 2., # RoPE 的插值因子，默认为 2.0
+        return_attention_layer=-1, # 返回注意力层的索引，默认为 -1
         **kwargs
     ):
         super().__init__()
@@ -674,7 +674,7 @@ class EEGTransformer(nn.Module):
         
         self.num_heads = num_heads
         
-        # --
+        # 用于将输入数据分割成 patch 并嵌入到指定维度
         self.patch_embed = patch_module(
             img_size=img_size,
             patch_size=patch_size,
@@ -683,25 +683,33 @@ class EEGTransformer(nn.Module):
         self.num_patches = self.patch_embed.num_patches
         # --
         
+        # 用于嵌入通道信息的嵌入层
         self.chan_embed = nn.Embedding(len(CHANNEL_DICT), embed_dim)
         # --
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+
+        # 由多个 Transformer 块组成的模块列表
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, 
                 is_causal=False, use_rope= False, return_attention=(i+1)==return_attention_layer)
             for i in range(depth)])
+        
+        # 归一化层
         self.norm = norm_layer(embed_dim)
         # ------
         self.init_std = init_std
+        # 用于聚合信息的可学习参数
         self.summary_token = nn.Parameter(torch.zeros(1, embed_num, embed_dim))
             
         trunc_normal_(self.summary_token, std=self.init_std)
         self.apply(self._init_weights)
         self.fix_init_weight()
-        
+    
+    # 根据输入的通道名称生成对应的通道 ID
     def prepare_chan_ids(self, channels):
+        # channels: 通道名称列表
         chan_ids = []
         for ch in channels:
             ch = ch.upper().strip('.')
@@ -709,14 +717,18 @@ class EEGTransformer(nn.Module):
             chan_ids.append(CHANNEL_DICT[ch])
         return torch.tensor(chan_ids).unsqueeze_(0).long()
     
+    # 调整 Transformer 块的权重以稳定训练
     def fix_init_weight(self):
         def rescale(param, layer_id):
+            # param: 权重参数
+            # layer_id: 当前层的索引
             param.div_(math.sqrt(2.0 * layer_id))
 
         for layer_id, layer in enumerate(self.blocks):
             rescale(layer.attn.proj.weight.data, layer_id + 1)
             rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
+    # 初始化权重
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=self.init_std)
@@ -734,11 +746,12 @@ class EEGTransformer(nn.Module):
 
     def forward(self, x, chan_ids=None, mask_x=None, mask_t=None):
         # x.shape B, C, T
-        # mask_x.shape mN, mC
-        # mask_t.shape mN
+        # mask_x.shape mN, mC 用于掩码输入的掩码
+        # mask_t.shape mN 用于掩码时间的掩码
+        # chan_ids 通道 ID
         
         # -- patchify x
-        x = self.patch_embed(x) #
+        x = self.patch_embed(x) # 输入数据，形状为 (B, C, T)，其中 B 是批次大小，C 是通道数，T 是时间点。
         B, N, C, D = x.shape
         
         assert N==self.num_patches[1] and C==self.num_patches[0], f"{N}=={self.num_patches[1]} and {C}=={self.num_patches[0]}"

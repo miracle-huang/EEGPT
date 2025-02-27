@@ -56,7 +56,7 @@ class LitEEGPTCausal(pl.LightningModule):
 
     def __init__(self, load_path="../checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt"):
         super().__init__()    
-        self.chans_num = len(use_channels_names)
+        self.chans_num = len(use_channels_names) # 选取的EEG通道数量
         # init model
         target_encoder = EEGTransformer(
             img_size=[self.chans_num, int(2.1*256)],
@@ -243,8 +243,6 @@ global max_lr
 batch_size=64
 max_epochs = 100
 
-
-
 all_subjects = [1,2,3,4,5,6,7,9,11]
 for i,sub in enumerate(all_subjects):
     sub_train = [f".sub{x}" for x in all_subjects if x!=sub]
@@ -253,8 +251,11 @@ for i,sub in enumerate(all_subjects):
     train_dataset = torchvision.datasets.DatasetFolder(root="../datasets/downstream/PhysioNetP300", loader=torch.load, extensions=sub_train)
     valid_dataset = torchvision.datasets.DatasetFolder(root="../datasets/downstream/PhysioNetP300", loader=torch.load, extensions=sub_valid)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=8, shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8, shuffle=False)
+    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=8, shuffle=True)
+    # valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8, shuffle=False)
+    # 在windows下，为了避免出现死锁，num_workers=0
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=0, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=0, shuffle=False)
 
     steps_per_epoch = math.ceil(len(train_loader))
     
