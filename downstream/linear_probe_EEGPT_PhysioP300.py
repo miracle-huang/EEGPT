@@ -54,25 +54,36 @@ print(channels_index)
 
 class LitEEGPTCausal(pl.LightningModule):
 
-    def __init__(self, load_path="../checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt"):
+    def __init__(self, load_path="checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt"):
         super().__init__()    
         self.chans_num = len(use_channels_names) # 选取的EEG通道数量
+        print(f"self.chans_num:{self.chans_num}") # self.chans_num:58, 有58个通道被选取
         # init model
         target_encoder = EEGTransformer(
-            img_size=[self.chans_num, int(2.1*256)],
-            patch_size=32*2,
+            # 输入数据的大小，通常是一个二维张量的形状 [channels, time_points]
+            # self.chans_num：表示 EEG 数据的通道数量（即电极数量）。
+            # int(2.1*256)：表示时间维度的数据点数量，2.1 是时间长度（秒），256 是采样率（Hz）
+            img_size=[self.chans_num, int(2.1*256)], # [58, 538]
+            # patch_size 决定了如何将输入数据（img_size）沿时间维度分割成多个小块（patch）
+            # num_patches = (time_points - patch_size) // patch_stride + 1 = 15
+            patch_size=32*2, 
             patch_stride = 32,
+            
+            # embed_num：表示 Transformer 的嵌入层的数量
+            # embed_dim：嵌入层的维度，表示每个补丁在嵌入空间中的表示大小。
+            # 如果数据维度较高或模型需要更多的特征表达能力，可以增加此值。
             embed_num=4,
             embed_dim=512,
-            depth=8,
-            num_heads=8,
-            mlp_ratio=4.0,
-            drop_rate=0.0,
-            attn_drop_rate=0.0,
-            drop_path_rate=0.0,
-            init_std=0.02,
-            qkv_bias=True, 
-            norm_layer=partial(nn.LayerNorm, eps=1e-6))
+            depth=8, # 表示 Transformer 的深度，即 Transformer 中包含多少个 Encoder 层
+            num_heads=8, # 表示 Transformer 中的多头注意力机制的头数, 如果嵌入维度较高，可以增加 num_heads
+            # 在 Transformer 块中，MLP 层的隐藏层大小是 embed_dim * mlp_ratio
+            mlp_ratio=4.0, # 表示 MLP 层的维度是嵌入维度的多少倍 
+            drop_rate=0.0, # Dropout 的比例，用于防止过拟合, drop_rate=0.0 表示不使用 Dropout
+            attn_drop_rate=0.0, # 注意力机制中的 Dropout 比例
+            drop_path_rate=0.0, # Stochastic Depth（随机深度） 的丢弃比例
+            init_std=0.02, # 初始化参数的标准差
+            qkv_bias=True, # 是否在 QKV 层中使用偏置
+            norm_layer=partial(nn.LayerNorm, eps=1e-6)) # 归一化层的类型，这里使用 LayerNorm
             
         self.target_encoder = target_encoder
         # self.predictor      = predictor
@@ -81,42 +92,70 @@ class LitEEGPTCausal(pl.LightningModule):
         # -- load checkpoint
         pretrain_ckpt = torch.load(load_path)
         
+        # 从预训练模型中提取目标编码器的参数（只加载预训练模型的target_encoder部分的权重参数）
         target_encoder_stat = {}
         for k,v in pretrain_ckpt['state_dict'].items():
             if k.startswith("target_encoder."):
                 target_encoder_stat[k[15:]]=v
         
+        # 定义了一个可学习的通道缩放参数，用于调整每个通道的重要性
         self.chan_scale       = torch.nn.Parameter(torch.ones(1, self.chans_num, 1)+ 0.001*torch.rand((1, self.chans_num, 1)), requires_grad=True)
         
-                
+        # 将预训练模型的参数加载到目标编码器中
+        # load_state_dict方法将权重参数复制到模型中对应的层和参数中
         self.target_encoder.load_state_dict(target_encoder_stat)
         
+        # 定义了两个线性层，用于将编码器提取的特征映射到最终的分类结果
+        '''
+        线性层的参数设置：
+        2048 = 4 x 512 = embed_num x embed_dim
+        240 = 15 x 16 = (时间窗口数) x (linear_probe1 的输出维度)
+        '''
         self.linear_probe1   =   LinearWithConstraint(2048, 16, max_norm=1)
         self.linear_probe2   =   LinearWithConstraint(240, 2, max_norm=0.25)
        
         self.drop           = torch.nn.Dropout(p=0.50)
         
-        self.loss_fn        = torch.nn.CrossEntropyLoss()
+        self.loss_fn        = torch.nn.CrossEntropyLoss() # 定义了交叉熵损失函数
         
         self.running_scores = {"train":[], "valid":[], "test":[]}
         self.is_sanity = True
         
     
     def forward(self, x):
-        # print(x.shape) # B, C, T
+        print(f"x.shape:{x.shape}") # B, C, T ([64, 64, 538])
+        '''
+        B: Batch size (批次大小)
+        C: Channels (通道数, 即EEG电极数量)
+        T: Time steps (时间步长, 即采样点数量)
+        '''
         B, C, T = x.shape
         
-        x = x.to(torch.float)
+        x = x.to(torch.float) # 确保输入数据是浮点类型
         
-        x = x - x.mean(dim=-2, keepdim=True)
+        x = x - x.mean(dim=-2, keepdim=True) # 通道均值归一化,去除了共模噪声，突出了局部脑电活动
         
-        x = x[:,channels_index,:]
-        x = x * self.chan_scale
+        x = x[:,channels_index,:] # 选取指定的通道
+        x = x * self.chan_scale # 通过可学习的通道缩放参数调整每个通道的重要性
+        print(f"x.shape(after chan_scale):{x.shape}") # B, C, T ([64, 58, 538])
         
-        self.target_encoder.eval()
-        z = self.target_encoder(x, self.chans_id.to(x))
+        # 使用预训练编码器提取特征 z: 表示编码器提取的特征
+        # z 是一个特征向量或嵌入向量，它是通过非线性变换从原始输入空间映射到特征空间的结果：z = f(x, c)
+        # 批量维度 [64]：处理的样本数量
+        # 时间窗口维度 [15]：将原始信号分割成15个时间窗口
+        # 嵌入数量维度 [4]：由 embed_num=4 直接决定，生成4个不同的嵌入向量
+        # 嵌入维度 [512]：由 embed_dim=512 直接决定，每个嵌入向量的维度
+        # f 表示编码器，x 表示输入数据，c 表示通道标识符 (chans_id)
+        self.target_encoder.eval() 
+        z = self.target_encoder(
+            x, # 第一个参数：输入数据
+            self.chans_id.to(x) # 第二个参数：通道标识符（已移至相同设备）
+            ) 
+        # 
+        print(f"z.shape:{z.shape}") # B, C, T ([64, 15, 4, 512])
+        print(f"x.shape(after process):{x.shape}") # B, C, T ([64, 58, 538])
         
-        h = z.flatten(2)
+        h = z.flatten(2) # 编码器输出z的第2维之后的所有维度展平
         
         h = self.linear_probe1(self.drop(h))
         
@@ -248,8 +287,8 @@ for i,sub in enumerate(all_subjects):
     sub_train = [f".sub{x}" for x in all_subjects if x!=sub]
     sub_valid = [f".sub{sub}"]
     print(sub_train, sub_valid)
-    train_dataset = torchvision.datasets.DatasetFolder(root="../datasets/downstream/PhysioNetP300", loader=torch.load, extensions=sub_train)
-    valid_dataset = torchvision.datasets.DatasetFolder(root="../datasets/downstream/PhysioNetP300", loader=torch.load, extensions=sub_valid)
+    train_dataset = torchvision.datasets.DatasetFolder(root="datasets/downstream/PhysioNetP300", loader=torch.load, extensions=sub_train)
+    valid_dataset = torchvision.datasets.DatasetFolder(root="datasets/downstream/PhysioNetP300", loader=torch.load, extensions=sub_valid)
 
     # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=8, shuffle=True)
     # valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8, shuffle=False)

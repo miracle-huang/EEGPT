@@ -708,6 +708,11 @@ class EEGTransformer(nn.Module):
         self.fix_init_weight()
     
     # 根据输入的通道名称生成对应的通道 ID
+    '''
+    接收EEG通道名称列表
+    将每个通道名称标准化并转换为预定义的数值ID
+    将这些ID组织成适合神经网络处理的张量格式
+    '''
     def prepare_chan_ids(self, channels):
         # channels: 通道名称列表
         chan_ids = []
