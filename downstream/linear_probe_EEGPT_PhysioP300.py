@@ -188,15 +188,17 @@ class LitEEGPTCausal(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # training_step defined the train loop.
         # It is independent of forward
+        # batch 是数据加载器提供的一批数据，通常包含输入特征和目标标签
+        # 将 batch 解包为输入 x（EEG 信号数据）和标签 y
         x, y = batch
         label = y.long()
         
-        x, logit = self.forward(x)
+        x, logit = self.forward(x) # 前向传播，返回处理后的输入数据x和预测的模型输出logit
         loss = self.loss_fn(logit, label)
         preds = torch.argmax(logit, dim=-1)
         accuracy = ((preds==label)*1.0).mean()
         y_score =  logit
-        y_score =  torch.softmax(y_score, dim=-1)[:,1]
+        y_score =  torch.softmax(y_score, dim=-1)[:,1] # 将 logits 通过 softmax 函数转换为概率分布
         self.running_scores["train"].append((label.clone().detach().cpu(), y_score.clone().detach().cpu()))
         
         # Logging to TensorBoard by default
