@@ -211,7 +211,7 @@ class LitEEGPTCausal(pl.LightningModule):
         
         return loss
     def on_validation_epoch_start(self) -> None:
-        self.running_scores["valid"]=[]
+        self.running_scores["valid"]=[] #在每个验证周期开始时，创建一个空列表用于收集验证过程中的预测结果和真实标签
         return super().on_validation_epoch_start()
     def on_validation_epoch_end(self) -> None:
         if self.is_sanity:
@@ -226,9 +226,11 @@ class LitEEGPTCausal(pl.LightningModule):
         y_score = torch.cat(y_score, dim=0)
         print(label.shape, y_score.shape)
         
+        # 计算多种评估指标
         metrics = ["accuracy", "balanced_accuracy", "precision", "recall", "cohen_kappa", "f1", "roc_auc"]
         results = get_metrics(y_score.cpu().numpy(), label.cpu().numpy(), metrics, True)
         
+        # 记录指标
         for key, value in results.items():
             self.log('valid_'+key, value, on_epoch=True, on_step=False, sync_dist=True)
         return super().on_validation_epoch_end()
@@ -236,7 +238,12 @@ class LitEEGPTCausal(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         # training_step defined the train loop.
         # It is independent of forward
-        x, y = batch
+        '''
+        定义模型在每个验证批次(batch)上的操作过程
+        batch：一个批次的数据，通常由数据加载器提供，包含输入特征和目标标签。
+        batch_idx：当前批次的索引，用于标识这是验证集中的第几个批次。
+        '''
+        x, y = batch # 解包 batch 为输入 x 和标签 y
         label = y.long()
         
         x, logit = self.forward(x)
@@ -254,13 +261,14 @@ class LitEEGPTCausal(pl.LightningModule):
         return loss
     
     def configure_optimizers(self):
-        
         optimizer = torch.optim.AdamW(
             [self.chan_scale]+
             list(self.linear_probe1.parameters())+
             list(self.linear_probe2.parameters()),
             weight_decay=0.01)#
         
+        # 是一种动态学习率调整策略，学习率会在一个周期内从较低值逐渐增加到最大值，然后再逐渐降低。
+        # 这种策略能够在训练初期快速收敛，同时避免训练后期过早结束优化。
         lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=max_lr, steps_per_epoch=steps_per_epoch, epochs=max_epochs, pct_start=0.2)
         lr_dict = {
             'scheduler': lr_scheduler, # The LR scheduler instance (required)
@@ -286,7 +294,7 @@ import math
 
 global max_epochs
 global steps_per_epoch
-global max_lr
+global max_lr # 学习率调度器的最大学习率，在每次循环中设置为 8e-4
 
 batch_size=64
 max_epochs = 100
