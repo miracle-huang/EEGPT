@@ -99,7 +99,8 @@ class LitEEGPTCausal(pl.LightningModule):
                 target_encoder_stat[k[15:]]=v
         
         # 定义了一个可学习的通道缩放参数，用于调整每个通道的重要性
-        self.chan_scale       = torch.nn.Parameter(torch.ones(1, self.chans_num, 1)+ 0.001*torch.rand((1, self.chans_num, 1)), requires_grad=True)
+        # 注意力机制：可以作为权重，用于对不同通道的特征赋予不同的重要性。
+        self.chan_scale = torch.nn.Parameter(torch.ones(1, self.chans_num, 1)+ 0.001*torch.rand((1, self.chans_num, 1)), requires_grad=True)
         
         # 将预训练模型的参数加载到目标编码器中
         # load_state_dict方法将权重参数复制到模型中对应的层和参数中
@@ -164,6 +165,8 @@ class LitEEGPTCausal(pl.LightningModule):
         h = self.linear_probe2(h)
         
         return x, h
+    
+    # 在训练过程中计算和记录模型性能指标
     def on_train_epoch_start(self) -> None:
         self.running_scores["train"]=[]
         return super().on_train_epoch_start()
@@ -178,6 +181,10 @@ class LitEEGPTCausal(pl.LightningModule):
         self.log('train_rocauc', rocauc, on_epoch=True, on_step=False, sync_dist=True)
         return super().on_train_epoch_end()
     
+    '''
+    PyTorch Lightning 框架的一个特殊方法，由框架内部自动调用，而不是在代码中直接调用
+    trainer.fit() 方法会自动调用 training_step() 方法
+    '''
     def training_step(self, batch, batch_idx):
         # training_step defined the train loop.
         # It is independent of forward
