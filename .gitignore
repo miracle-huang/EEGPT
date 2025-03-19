@@ -1,8 +1,11 @@
 /datasets/datasets/
 /datasets/downstream/PhysioNetP300/
+/datasets/downstream/DEAP/
 /checkpoint/
 /downstream/__pycache__/
 /downstream/logs/
 /downstream/Data_process/__pycache__/
 /downstream/Modules/Network/__pycache__/
 /downstream/Modules/models/__pycache__/
+/logs/
+/result/
