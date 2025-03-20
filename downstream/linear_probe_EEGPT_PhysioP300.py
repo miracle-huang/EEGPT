@@ -297,7 +297,7 @@ global steps_per_epoch
 global max_lr # 学习率调度器的最大学习率，在每次循环中设置为 8e-4
 
 batch_size=64
-max_epochs = 100
+max_epochs = 1
 
 all_subjects = [1,2,3,4,5,6,7,9,11]
 for i,sub in enumerate(all_subjects):

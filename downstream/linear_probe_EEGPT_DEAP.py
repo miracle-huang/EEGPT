@@ -13,7 +13,7 @@ from sklearn.metrics import confusion_matrix, balanced_accuracy_score, cohen_kap
 from pytorch_lightning import Trainer
 import time
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import TQDMProgressBar, LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import TQDMProgressBar, LearningRateMonitor, ModelCheckpoint, EarlyStopping
 
 from utils import *
 from utils_eval import get_metrics
@@ -209,6 +209,31 @@ class LitEEGPTCausal(pl.LightningModule):
             self.log('valid_'+key, value, on_epoch=True, on_step=False, sync_dist=True)
         return super().on_validation_epoch_end()
     
+    def validation_step(self, batch, batch_idx):
+        # training_step defined the train loop.
+        # It is independent of forward
+        '''
+        定义模型在每个验证批次(batch)上的操作过程
+        batch：一个批次的数据，通常由数据加载器提供，包含输入特征和目标标签。
+        batch_idx：当前批次的索引，用于标识这是验证集中的第几个批次。
+        '''
+        x, y = batch # 解包 batch 为输入 x 和标签 y
+        label = y.long()
+        
+        x, logit = self.forward(x)
+        
+        preds = torch.argmax(logit, dim=-1)
+        accuracy = ((preds==label)*1.0).mean()
+        
+        loss = self.loss_fn(logit, label)
+        y_score =  logit
+        y_score =  torch.softmax(y_score, dim=-1)[:,1]
+        self.running_scores["valid"].append((label.clone().detach().cpu(), y_score.clone().detach().cpu()))
+        # Logging to TensorBoard by default
+        self.log('valid_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
+        self.log('valid_acc', accuracy, on_epoch=True, on_step=False, sync_dist=True)
+        return loss
+
     def test_step(self, batch, batch_idx):
         # 解包测试数据
         x, y = batch
@@ -379,7 +404,7 @@ if __name__ == "__main__":
     mat_dir = "datasets/downstream/DEAP/video"
     mat_files = [os.path.join(mat_dir, f) for f in os.listdir(mat_dir) if f.endswith(".mat")]
 
-    video_list = list(range(1, 41))
+    video_list = list(range(12, 41))
     for video_id in video_list:
 
         # 按文件名划分训练集和测试集
@@ -416,20 +441,12 @@ if __name__ == "__main__":
         # 设置回调函数
         lr_monitor = LearningRateMonitor(logging_interval='epoch')
         progress_bar = TQDMProgressBar(refresh_rate=1)
-        checkpoint_callback = ModelCheckpoint(
-            monitor='val_loss',
-            dirpath='checkpoints/',
-            filename='eegpt-deap-{epoch:02d}-{val_loss:.2f}',
-            save_top_k=1,
-            mode='min',
-        )
-        callbacks = [lr_monitor, progress_bar, checkpoint_callback]
+        callbacks = [lr_monitor, progress_bar]
         max_lr = 8e-4
 
         # 创建训练日志记录器
         train_logger = pl_loggers.CSVLogger('./logs/', name="EEGPT_DEAP_video_train", version=f"video{video_id}")
         tb_logger = pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_DEAP_video_tb", version=f"video{video_id}")
-
         # 设置训练器
         trainer = pl.Trainer(accelerator='cuda',
                         max_epochs=max_epochs, 
@@ -438,18 +455,14 @@ if __name__ == "__main__":
                         logger=[tb_logger, train_logger]
                     )
 
+        # 查看训练前的某些参数
+        # print("训练前的参数：", list(model.parameters())[0].data)
+
         # 训练模型
         trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
-        # 获取最佳模型路径
-        best_model_path = checkpoint_callback.best_model_path
-        print(f"Best model path: {best_model_path}")
-
-        # 加载最佳模型
-        if os.path.exists(best_model_path):
-            model = LitEEGPTCausal.load_from_checkpoint(best_model_path)
-        else:
-            print("Warning: Best model checkpoint not found. Using the current model state.")
+        # 查看训练后的某些参数，检查模型的权重是否发生了变化
+        # print("训练后的参数：", list(model.parameters())[0].data)
 
         # 创建测试日志记录器
         test_logger = pl_loggers.CSVLogger('./logs/', name="EEGPT_DEAP_video_test", version=f"video{video_id}")
@@ -463,7 +476,7 @@ if __name__ == "__main__":
         # 测试模型
         test_trainer.test(model, dataloaders=test_loader)
 
-        # 保存模型权重
+        # 保存训练好的模型权重
         torch.save(model.state_dict(), f"result/liteeegpt_causal_video{video_id}.pth")
 
     # 记录结束时间
