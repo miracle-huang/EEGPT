@@ -404,65 +404,27 @@ if __name__ == "__main__":
     mat_dir = "datasets/downstream/DEAP/video"
     mat_files = [os.path.join(mat_dir, f) for f in os.listdir(mat_dir) if f.endswith(".mat")]
 
-    video_list = list(range(1, 21))
+    video_list = list(range(1, 41))
     for video_id in video_list:
-
-        # 按文件名划分训练集和测试集
-        train_files = [f for f in mat_files if "video_" in f and int(f.split("_")[1].split(".")[0]) != video_id]  # 训练文件：编号不等于 video_id
+        # 直接用EEGPT预训练模型进行迁移学习
         test_files = [f for f in mat_files if "video_" in f and int(f.split("_")[1].split(".")[0]) == video_id]   # 测试文件：编号等于 video_id
-        print("现在用于测试leave-one-out的视频编号：", video_id)
+        print("现在用于测试的视频编号：", video_id)
 
         # 数据键名
         data_key = "data"  # 替换为 .mat 文件中的数据键名
-        label_key = "arousal_labels"  # 替换为 .mat 文件中的标签键名（如果有）
-
-        # 创建训练集和验证集
-        train_dataset = MatDataset(train_files, data_key, label_key, split="train")
-        val_dataset = MatDataset(train_files, data_key, label_key, split="val")
+        label_key = "valence_labels"  # 替换为 .mat 文件中的标签键名（如果有）
 
         # 创建测试集
         test_dataset = MatDataset(test_files, data_key, label_key, split="test")
 
         # 创建 DataLoader
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-        steps_per_epoch = math.ceil(len(train_loader))
-
         # 验证数据加载
-        print("Train dataset size:", len(train_dataset))
-        print("Validation dataset size:", len(val_dataset))
         print("Test dataset size:", len(test_dataset))
 
-        # 初始化模型
+        # 加载预训练模型
         model = LitEEGPTCausal()
-        # most basic trainer, uses good defaults (auto-tensorboard, checkpoints, logs, and more)
-        # 设置回调函数
-        lr_monitor = LearningRateMonitor(logging_interval='epoch')
-        progress_bar = TQDMProgressBar(refresh_rate=1)
-        callbacks = [lr_monitor, progress_bar]
-        max_lr = 8e-4
-
-        # 创建训练日志记录器
-        train_logger = pl_loggers.CSVLogger('./logs/', name="EEGPT_DEAP_video_train", version=f"video{video_id}")
-        tb_logger = pl_loggers.TensorBoardLogger('./logs/', name="EEGPT_DEAP_video_tb", version=f"video{video_id}")
-        # 设置训练器
-        trainer = pl.Trainer(accelerator='cuda',
-                        max_epochs=max_epochs, 
-                        callbacks=callbacks,
-                        enable_checkpointing=True,
-                        logger=[tb_logger, train_logger]
-                    )
-
-        # 查看训练前的某些参数
-        # print("训练前的参数：", list(model.parameters())[0].data)
-
-        # 训练模型
-        trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
-
-        # 查看训练后的某些参数，检查模型的权重是否发生了变化
-        # print("训练后的参数：", list(model.parameters())[0].data)
 
         # 创建测试日志记录器
         test_logger = pl_loggers.CSVLogger('./logs/', name="EEGPT_DEAP_video_test", version=f"video{video_id}")
@@ -475,10 +437,7 @@ if __name__ == "__main__":
 
         # 测试模型
         test_trainer.test(model, dataloaders=test_loader)
-
-        # 保存训练好的模型权重
-        torch.save(model.state_dict(), f"result/liteeegpt_causal_video{video_id}.pth")
-
+       
     # 记录结束时间
     end_time = time.time()
 
