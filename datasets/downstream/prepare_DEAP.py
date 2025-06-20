@@ -114,7 +114,28 @@ def split_into_windows(data, labels, window_size=128):
             window_labels.append((arousal_label, valence_label))
     return np.array(windows), np.array(window_labels)
 
-def save_by_subject(data, labels, subject_id, output_folder="datasets/downstream/DEAP/subject"):
+# def split_into_windows(data, labels, window_size=2560, step_size=256):
+#     """
+#     将数据按照窗口大小分割，并分配标签。
+#     data: 输入数据，维度为 (trials, channels, samples)
+#     labels: 标签数据，维度为 (trials, 4)
+#     window_size: 每个窗口的采样点数
+#     step_size: 滑动窗口的步长
+#     """
+#     trials, channels, samples = data.shape
+#     windows = []
+#     window_labels = []
+#     for trial in range(trials):
+#         for start in range(0, samples - window_size + 1, step_size):
+#             end = start + window_size
+#             windows.append(data[trial, :, start:end])
+#             # 根据标签分配窗口标签           
+#             valence_label = 1 if labels[trial, 0] > 5 else 0
+#             arousal_label = 1 if labels[trial, 1] > 5 else 0
+#             window_labels.append((arousal_label, valence_label))
+#     return np.array(windows), np.array(window_labels)
+
+def save_by_subject(data, labels, subject_id, output_folder="datasets/downstream/DEAP/window_size5/subject"):
     """
     按 subject 保存数据为 .mat 文件。
     data: 分割后的数据
@@ -129,7 +150,7 @@ def save_by_subject(data, labels, subject_id, output_folder="datasets/downstream
     sio.savemat(output_path, {'data': data, 'valence_labels': valence_labels, 'arousal_labels': arousal_labels})
     print(f"按 subject 保存数据: {output_path}")
 
-def save_by_video(data, labels, video_id, output_folder="datasets/downstream/DEAP/video"):
+def save_by_video(data, labels, video_id, output_folder="datasets/downstream/DEAP/window_size5/video"):
     """
     按 video 保存数据为 .mat 文件。
     data: 分割后的数据
@@ -156,10 +177,10 @@ if __name__ == '__main__':
             # 读取文件并处理
             data, labels = read_file(file_path)  # 数据维度为 (trials, channels, samples)
             # 分割数据
-            windows, window_labels = split_into_windows(data, labels, window_size=128)  # 窗口化数据维度为 (num_windows, channels, window_size)
+            windows, window_labels = split_into_windows(data, labels, window_size=1280)  # 窗口化数据维度为 (num_windows, channels, window_size)
             all_subject_data.append(windows)  # 按 subject 存储窗口化数据
             all_subject_labels.append(window_labels)  # 按 subject 存储窗口化标签
-            save_by_subject(windows, window_labels, subject_id)  # 按 subject 保存
+            # save_by_subject(windows, window_labels, subject_id)  # 按 subject 保存
             print(f"处理完成: {file_name}")
     
     # 按 video 保存

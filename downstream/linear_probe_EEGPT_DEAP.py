@@ -43,7 +43,7 @@ class LitEEGPTCausal(pl.LightningModule):
         target_encoder = EEGTransformer(
             # 输入数据的大小，通常是一个二维张量的形状 [channels, time_points]
             # int(0.5*256)：表示时间维度的数据点数量，0.5 是时间长度（秒），256 是采样率（Hz）
-            img_size=[32, int(0.5*256)], 
+            img_size=[32, int(5*256)], 
             # patch_size 决定了如何将输入数据（img_size）沿时间维度分割成多个小块（patch）
             # num_patches = (time_points - patch_size) // patch_stride + 1 = 15
             patch_size=32*2, 
@@ -53,7 +53,7 @@ class LitEEGPTCausal(pl.LightningModule):
             # embed_dim：嵌入层的维度，表示每个补丁在嵌入空间中的表示大小。
             # 如果数据维度较高或模型需要更多的特征表达能力，可以增加此值。
             embed_num=4,
-            embed_dim=512,
+            embed_dim=512, # 嵌入维度，表示每个补丁在嵌入空间中的表示大小
             depth=8, # 表示 Transformer 的深度，即 Transformer 中包含多少个 Encoder 层
             num_heads=8, # 表示 Transformer 中的多头注意力机制的头数, 如果嵌入维度较高，可以增加 num_heads
             # 在 Transformer 块中，MLP 层的隐藏层大小是 embed_dim * mlp_ratio
@@ -95,7 +95,7 @@ class LitEEGPTCausal(pl.LightningModule):
         48 = 3 x 16 = (时间窗口数) x (linear_probe1 的输出维度)
         '''
         self.linear_probe1   =   LinearWithConstraint(2048, 16, max_norm=1)
-        self.linear_probe2   =   LinearWithConstraint(48, 2, max_norm=0.25)
+        self.linear_probe2   =   LinearWithConstraint(39*16, 2, max_norm=0.25)
        
         self.drop           = torch.nn.Dropout(p=0.50)
         
@@ -356,6 +356,12 @@ class MatDataset(Dataset):
             if label_key:
                 labels = torch.tensor(mat_data[label_key], dtype=torch.long).squeeze()
 
+            # 打乱数据和标签（保证数据和标签的对应关系）
+            indices = torch.randperm(len(data))  # 生成一个随机索引序列
+            data = data[indices]
+            if labels is not None:
+                labels = labels[indices]
+
             # 根据 split 划分数据
             total_samples = len(data)
             train_end = int(0.8 * total_samples)  # 前 80% 的索引
@@ -395,21 +401,31 @@ class MatDataset(Dataset):
 
 
 if __name__ == "__main__":
+
+    torch.multiprocessing.set_start_method('spawn', force=True) # 设置多进程启动方法为 spawn
+
     # 记录开始时间
     start_time = time.time()
 
     os.makedirs("result", exist_ok=True) # 创建结果文件夹
 
     # 假设所有 .mat 文件都存储在一个目录下
-    mat_dir = "datasets/downstream/DEAP/video"
+    mat_dir = "datasets/downstream/DEAP/window_size5/video"
     mat_files = [os.path.join(mat_dir, f) for f in os.listdir(mat_dir) if f.endswith(".mat")]
+    mat_files = [f.replace("\\", "/") for f in mat_files]
 
-    video_list = list(range(1, 21))
+    video_list = list(range(1, 41))
     for video_id in video_list:
 
         # 按文件名划分训练集和测试集
-        train_files = [f for f in mat_files if "video_" in f and int(f.split("_")[1].split(".")[0]) != video_id]  # 训练文件：编号不等于 video_id
-        test_files = [f for f in mat_files if "video_" in f and int(f.split("_")[1].split(".")[0]) == video_id]   # 测试文件：编号等于 video_id
+        train_files = [
+            f for f in mat_files
+            if "video_" in os.path.basename(f) and int(os.path.basename(f).split("_")[1].split(".")[0]) != video_id
+        ]
+        test_files = [
+            f for f in mat_files
+            if "video_" in os.path.basename(f) and int(os.path.basename(f).split("_")[1].split(".")[0]) == video_id
+        ]
         print("现在用于测试leave-one-out的视频编号：", video_id)
 
         # 数据键名
@@ -424,9 +440,9 @@ if __name__ == "__main__":
         test_dataset = MatDataset(test_files, data_key, label_key, split="test")
 
         # 创建 DataLoader
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
+        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
 
         steps_per_epoch = math.ceil(len(train_loader))
 
@@ -450,6 +466,7 @@ if __name__ == "__main__":
         # 设置训练器
         trainer = pl.Trainer(accelerator='cuda',
                         max_epochs=max_epochs, 
+                        precision=16, 
                         callbacks=callbacks,
                         enable_checkpointing=True,
                         logger=[tb_logger, train_logger]
