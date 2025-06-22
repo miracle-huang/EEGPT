@@ -22,6 +22,8 @@ AMIGO_half_valence_high = [1, 2, 4, 15]
 AMIGO_half_arousal_low = [1, 2, 3, 4]
 AMIGO_half_arousal_high = [8, 9, 11, 13]
 
+AMIGO_channels_num = 14  # AMIGO 数据集的通道数
+
 # channel names mapping
 amigo_channel_mapping = {
     0: 'AF3',
