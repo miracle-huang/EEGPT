@@ -2,6 +2,7 @@
 /datasets/downstream/PhysioNetP300/
 /datasets/downstream/DEAP/
 /datasets/downstream/amigo/
+/datasets/downstream/dreamer/
 /checkpoint/
 /downstream/__pycache__/
 /downstream/logs/
