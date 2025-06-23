@@ -18,14 +18,14 @@ from pytorch_lightning.callbacks import TQDMProgressBar, LearningRateMonitor, Mo
 from utils import *
 from utils_eval import get_metrics
 from Modules.models.EEGPT_mcae import EEGTransformer
+
 import config
 
 global max_epochs
 global steps_per_epoch
 global max_lr # 学习率调度器的最大学习率，在每次循环中设置为 8e-4
 
-max_epochs = 30
-max_lr = 8e-4
+max_epochs = 50
 
 def seed_torch(seed=1029):
 	random.seed(seed)
@@ -46,11 +46,10 @@ class LitEEGPTCausal(pl.LightningModule):
         self.test_video_name = test_video_name
         target_encoder = EEGTransformer(
             # 输入数据的大小，通常是一个二维张量的形状 [channels, time_points]
-            # int(0.5*256)：表示时间维度的数据点数量，0.5 是时间长度（秒），256 是采样率（Hz）
-            img_size=[32, int(5*256)], 
+            img_size=[config.AMIGO_channels_num, int(config.window_size_10)], 
             # patch_size 决定了如何将输入数据（img_size）沿时间维度分割成多个小块（patch）
-            # num_patches = (time_points - patch_size) // patch_stride + 1 = 15
-            patch_size=32*2, 
+            # num_patches = (time_points - patch_size) // patch_stride + 1
+            patch_size=64, 
             patch_stride = 32,
             
             # embed_num：表示 Transformer 的嵌入层的数量
@@ -71,22 +70,21 @@ class LitEEGPTCausal(pl.LightningModule):
         
         self.target_encoder = target_encoder
 
-        # 通道标识符，用于指定要使用的通道，暂时写死为 DEAP 数据集的 32 个通道
-        self.chans_id = torch.tensor([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-                        20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]])
+        # 通道标识符，用于指定要使用的通道，写死为 DREAMER 数据集的 14 个通道
+        self.chans_id = torch.tensor([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]])
 
         # -- load checkpoint
         pretrain_ckpt = torch.load(load_path)
-        
+
         # 从预训练模型中提取目标编码器的参数（只加载预训练模型的target_encoder部分的权重参数）
         target_encoder_stat = {}
         for k,v in pretrain_ckpt['state_dict'].items():
             if k.startswith("target_encoder."):
                 target_encoder_stat[k[15:]]=v
 
-        # 定义了一个可学习的通道缩放参数，用于调整每个通道的重要性
+        # 定义了一个可学习的通道缩放参数，用于调整每个通道的重要性，通道数为 14
         # 注意力机制：可以作为权重，用于对不同通道的特征赋予不同的重要性。
-        self.chan_scale = torch.nn.Parameter(torch.ones(1, 32, 1)+ 0.001*torch.rand((1, 32, 1)), requires_grad=True)
+        self.chan_scale = torch.nn.Parameter(torch.ones(1, 14, 1)+ 0.001*torch.rand((1, 14, 1)), requires_grad=True)
 
         # 将预训练模型的参数加载到目标编码器中
         # load_state_dict方法将权重参数复制到模型中对应的层和参数中
@@ -96,10 +94,10 @@ class LitEEGPTCausal(pl.LightningModule):
         '''
         线性层的参数设置：
         2048 = 4 x 512 = embed_num x embed_dim
-        48 = 3 x 16 = (时间窗口数) x (linear_probe1 的输出维度)
+        79 = (time_points - patch_size) // patch_stride + 1
         '''
         self.linear_probe1   =   LinearWithConstraint(2048, 16, max_norm=1)
-        self.linear_probe2   =   LinearWithConstraint(39*16, 2, max_norm=0.25)
+        self.linear_probe2   =   LinearWithConstraint(79*16, 2, max_norm=0.25) # num_patches = 79, 输出类别数为 2（valence 和 arousal）
        
         self.drop           = torch.nn.Dropout(p=0.50)
         
@@ -237,7 +235,7 @@ class LitEEGPTCausal(pl.LightningModule):
         self.log('valid_loss', loss, on_epoch=True, on_step=False, sync_dist=True)
         self.log('valid_acc', accuracy, on_epoch=True, on_step=False, sync_dist=True)
         return loss
-
+    
     def test_step(self, batch, batch_idx):
         # 解包测试数据
         x, y = batch
@@ -264,7 +262,7 @@ class LitEEGPTCausal(pl.LightningModule):
         self.log('test_acc', accuracy, on_epoch=True, on_step=False, sync_dist=True)
 
         return loss
-
+    
     def on_test_epoch_end(self) -> None:
         labels, preds, y_scores = [], [], []
         for label, pred, y_score in self.running_scores["test"]:
@@ -305,7 +303,7 @@ class LitEEGPTCausal(pl.LightningModule):
 
         # 保存混淆矩阵和指标到文件
         os.makedirs("result", exist_ok=True)
-        with open(f"result/test_results_deap_{self.exp_name}_video{self.test_video_name}.txt", "w") as f:
+        with open(f"result/test_results_video_dreamer_{self.exp_name}_video{self.test_video_name}.txt", "w") as f:
             f.write("Confusion Matrix:\n")
             f.write(str(conf_matrix) + "\n\n")
             f.write(f"Test Accuracy: {accuracy:.4f}\n")
@@ -337,7 +335,7 @@ class LitEEGPTCausal(pl.LightningModule):
         return (
             {'optimizer': optimizer, 'lr_scheduler': lr_dict},
         )
-
+    
 class MatDataset(Dataset):
     def __init__(self, mat_file_paths, data_key, label_key=None, split="train", transform=None):
         """
@@ -402,96 +400,7 @@ class MatDataset(Dataset):
         
         return (sample, label) if label is not None else sample
     
-def run_deap(train_video_list, emotion_type, exp_name):
-    video_list = config.DEAP_all_videos_list # DEAP 数据集的所有视频编号列表
-    
-    for video_id in video_list:
-
-        # 按文件名划分训练集和测试集
-        train_files = [
-            f for f in mat_files
-            if "video_" in os.path.basename(f)
-            and int(os.path.basename(f).split("_")[1].split(".")[0]) in train_video_list
-            and int(os.path.basename(f).split("_")[1].split(".")[0]) != video_id  # leave-one-out 排除当前测试编号
-        ]
-        test_files = [
-            f for f in mat_files
-            if "video_" in os.path.basename(f) and int(os.path.basename(f).split("_")[1].split(".")[0]) == video_id
-        ]
-        print("现在用于测试leave-one-out的视频编号：", video_id)
-
-        # 数据键名
-        data_key = "data"  # 替换为 .mat 文件中的数据键名
-        label_key = emotion_type  # 替换为 .mat 文件中的标签键名（如果有）
-
-        # 创建训练集和验证集
-        train_dataset = MatDataset(train_files, data_key, label_key, split="train")
-        val_dataset = MatDataset(train_files, data_key, label_key, split="val")
-
-        # 创建测试集
-        test_dataset = MatDataset(test_files, data_key, label_key, split="test")
-
-        # 创建 DataLoader
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
-        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
-
-        global steps_per_epoch
-        steps_per_epoch = math.ceil(len(train_loader))
-
-        # 验证数据加载
-        print("Train dataset size:", len(train_dataset))
-        print("Validation dataset size:", len(val_dataset))
-        print("Test dataset size:", len(test_dataset))
-
-        # 初始化模型
-        model = LitEEGPTCausal(exp_name='exp_name', test_video_name=video_id, load_path="checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt")
-        # most basic trainer, uses good defaults (auto-tensorboard, checkpoints, logs, and more)
-        # 设置回调函数
-        lr_monitor = LearningRateMonitor(logging_interval='epoch')
-        progress_bar = TQDMProgressBar(refresh_rate=1)
-        callbacks = [lr_monitor, progress_bar]
-        max_lr = 8e-4
-
-        # 创建训练日志记录器
-        train_logger = pl_loggers.CSVLogger('./logs/', name=f"EEGPT_DEAP_video_{exp_name}_train", version=f"video{video_id}")
-        tb_logger = pl_loggers.TensorBoardLogger('./logs/', name=f"EEGPT_DEAP_video_{exp_name}_tb", version=f"video{video_id}")
-        # 设置训练器
-        trainer = pl.Trainer(accelerator='cuda',
-                        max_epochs=max_epochs, 
-                        precision=16, 
-                        callbacks=callbacks,
-                        enable_checkpointing=True,
-                        logger=[tb_logger, train_logger]
-                    )
-
-        # 查看训练前的某些参数
-        # print("训练前的参数：", list(model.parameters())[0].data)
-
-        # 训练模型
-        trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
-
-        # 查看训练后的某些参数，检查模型的权重是否发生了变化
-        # print("训练后的参数：", list(model.parameters())[0].data)
-
-        # 创建测试日志记录器
-        test_logger = pl_loggers.CSVLogger('./logs/', name=f"EEGPT_DEAP_video_{exp_name}_test", version=f"video{video_id}")
-
-        # 设置测试训练器
-        test_trainer = pl.Trainer(
-            accelerator='cuda',
-            logger=[test_logger]
-        )
-
-        # 测试模型
-        test_trainer.test(model, dataloaders=test_loader)
-
-        # 保存训练好的模型权重
-        # torch.save(model.state_dict(), f"result/liteeegpt_causal_video{video_id}.pth")
-
-
 if __name__ == "__main__":
-
     torch.multiprocessing.set_start_method('spawn', force=True) # 设置多进程启动方法为 spawn
 
     # 记录开始时间
@@ -500,16 +409,109 @@ if __name__ == "__main__":
     os.makedirs("result", exist_ok=True) # 创建结果文件夹
 
     # 假设所有 .mat 文件都存储在一个目录下
-    mat_dir = "datasets/downstream/DEAP/window_size5/video"
+    mat_dir = "datasets/downstream/dreamer/windowsize_10"
     mat_files = [os.path.join(mat_dir, f) for f in os.listdir(mat_dir) if f.endswith(".mat")]
     mat_files = [f.replace("\\", "/") for f in mat_files]
 
-    deap_half_valence = config.DEAP_ten_valence_low + config.DEAP_ten_valence_high
-    deap_half_arousal = config.DEAP_ten_arousal_low + config.DEAP_ten_arousal_high
+    video_list = list(range(1, 19))  # DREAMER 数据集的视频列表
+    dreamer_half_valence = config.DREAMER_half_valence_low + config.DREAMER_half_valence_high
+    dreamer_half_arousal = config.DREAMER_half_arousal_low + config.DREAMER_half_arousal_high
+    dreamer_half = {
+        "valence_labels": dreamer_half_valence,
+        "arousal_labels": dreamer_half_arousal
+    }
+    dreamer_all = {
+        "valence_labels": config.DREAMER_all_videos_list,
+        "arousal_labels": config.DREAMER_all_videos_list
+    }
 
-    run_deap(config.DEAP_all_videos_list, "valence_labels", "all_valence")
-    run_deap(deap_half_valence, "valence_labels", "half_valence")
-    run_deap(deap_half_arousal, "arousal_labels", "half_arousal")
+    for key, all_video_list in dreamer_all.items():
+        for video_id in all_video_list:
+            
+            # 按文件名划分训练集和测试集，使用全部视频编号进行模型训练
+            train_files = [
+                f for f in mat_files
+                if "video_" in os.path.basename(f) and int(os.path.basename(f).split("_")[1].split(".")[0]) != video_id
+            ]
+            # 使用评分较高和较低的半数视频编号进行模型训练
+            # train_files = [
+            #     f for f in mat_files
+            #     if "video_" in os.path.basename(f)
+            #     and int(os.path.basename(f).split("_")[1].split(".")[0]) in half_video_list
+            #     and int(os.path.basename(f).split("_")[1].split(".")[0]) != video_id  # leave-one-out 排除当前测试编号
+            # ]
+            test_files = [
+                f for f in mat_files
+                if "video_" in os.path.basename(f) and int(os.path.basename(f).split("_")[1].split(".")[0]) == video_id
+            ]
+            print("现在用于测试leave-one-out的视频编号：", video_id)
+
+            # 数据键名
+            data_key = "data"  # 替换为 .mat 文件中的数据键名
+            # label_key = "arousal_labels"  # 替换为 .mat 文件中的标签键名（如果有）
+            label_key = key 
+
+            # 创建训练集和验证集
+            train_dataset = MatDataset(train_files, data_key, label_key, split="train")
+            val_dataset = MatDataset(train_files, data_key, label_key, split="val")
+
+            # 创建测试集
+            test_dataset = MatDataset(test_files, data_key, label_key, split="test")
+
+            # 创建 DataLoader
+            train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
+            val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
+            test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
+
+            steps_per_epoch = math.ceil(len(train_loader))
+
+            # 验证数据加载
+            print("Train dataset size:", len(train_dataset))
+            print("Validation dataset size:", len(val_dataset))
+            print("Test dataset size:", len(test_dataset))
+
+            # 初始化模型
+            model = LitEEGPTCausal(exp_name=key, test_video_name = video_id, load_path="checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt")
+            # most basic trainer, uses good defaults (auto-tensorboard, checkpoints, logs, and more)
+            # 设置回调函数
+            lr_monitor = LearningRateMonitor(logging_interval='epoch')
+            progress_bar = TQDMProgressBar(refresh_rate=1)
+            callbacks = [lr_monitor, progress_bar]
+            max_lr = 8e-4
+
+            # 创建训练日志记录器
+            train_logger = pl_loggers.CSVLogger('./logs/', name=f"EEGPT_dreamer_all_{label_key}_video_train", version=f"video{video_id}")
+            tb_logger = pl_loggers.TensorBoardLogger('./logs/', name=f"EEGPT_dreamer_all_{label_key}_video_tb", version=f"video{video_id}")
+
+            # 设置训练器
+            trainer = pl.Trainer(accelerator='cuda',
+                            max_epochs=max_epochs, 
+                            precision=16, 
+                            callbacks=callbacks,
+                            enable_checkpointing=True,
+                            logger=[tb_logger, train_logger]
+                        )
+            
+            # 训练模型
+            trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+
+            # 查看训练后的某些参数，检查模型的权重是否发生了变化
+            # print("训练后的参数：", list(model.parameters())[0].data)
+
+            # 创建测试日志记录器
+            test_logger = pl_loggers.CSVLogger('./logs/', name=f"EEGPT_dreamer_all_{label_key}_video_test", version=f"video{video_id}")
+
+            # 设置测试训练器
+            test_trainer = pl.Trainer(
+                accelerator='cuda',
+                logger=[test_logger]
+            )
+
+            # 测试模型
+            test_trainer.test(model, dataloaders=test_loader)
+
+            # 保存训练好的模型权重
+            # torch.save(model.state_dict(), f"result/liteeegpt_causal_video_dreamer_half_{video_id}.pth")
 
     # 记录结束时间
     end_time = time.time()

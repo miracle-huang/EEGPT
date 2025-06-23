@@ -3,8 +3,21 @@ import scipy.io as sio
 from scipy.fft import fft, ifft
 import numpy as np
 
+import sys
+from os import path
+sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
+
+# 获取当前脚本目录
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# 获取项目主目录（config.py 所在位置）
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+# 添加项目主目录到 sys.path
+sys.path.append(project_root)
+
 # 数据集文件夹路径
 dataset_folder = "datasets/datasets/DEAP/data_preprocessed_matlab/"
+
+import config
 
 # 指定需要保留的通道名称
 use_channels_names = [
@@ -109,8 +122,11 @@ def split_into_windows(data, labels, window_size=128):
             end = start + window_size
             windows.append(data[trial, :, start:end])
             # 根据标签分配窗口标签           
-            valence_label = 1 if labels[trial, 0] > 5 else 0
-            arousal_label = 1 if labels[trial, 1] > 5 else 0
+            # valence_label = 1 if labels[trial, 0] > 5 else 0
+            # arousal_label = 1 if labels[trial, 1] > 5 else 0
+            # 根据视频平均得分排行设定窗口标签
+            valence_label = 1 if trial + 1 in config.DEAP_half_valence_high else 0
+            arousal_label = 1 if trial + 1 in config.DEAP_half_arousal_high else 0
             window_labels.append((arousal_label, valence_label))
     return np.array(windows), np.array(window_labels)
 
@@ -177,7 +193,7 @@ if __name__ == '__main__':
             # 读取文件并处理
             data, labels = read_file(file_path)  # 数据维度为 (trials, channels, samples)
             # 分割数据
-            windows, window_labels = split_into_windows(data, labels, window_size=1280)  # 窗口化数据维度为 (num_windows, channels, window_size)
+            windows, window_labels = split_into_windows(data, labels, window_size=config.window_size_5)  # 窗口化数据维度为 (num_windows, channels, window_size)
             all_subject_data.append(windows)  # 按 subject 存储窗口化数据
             all_subject_labels.append(window_labels)  # 按 subject 存储窗口化标签
             # save_by_subject(windows, window_labels, subject_id)  # 按 subject 保存

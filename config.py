@@ -1,5 +1,6 @@
 frequency = 256  # 采样频率
 window_size_10 = 2560  # 窗口大小为10秒
+window_size_5 = 1280  # 窗口大小为5秒
 overlap = 0
 
 DREAMER_video_valence_ratings = [3.17, 3.04, 4.57, 2.04, 3.22, 2.70, 4.52, 1.35, 1.39, 2.17, 3.96, 3.96, 4.39, 2.35, 2.48, 3.65, 1.52, 2.65]
@@ -23,6 +24,24 @@ AMIGO_half_arousal_low = [1, 2, 3, 4]
 AMIGO_half_arousal_high = [8, 9, 11, 13]
 
 AMIGO_channels_num = 14  # AMIGO 数据集的通道数
+
+# valence and arousal content lists in DEAP dataset
+# A complete list of valence and arousal order, from low to high
+DEAP_all_videos_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]
+DEAP_valence_rating = [38, 37, 35, 23, 30, 39, 29, 21, 31, 32, 33, 34, 36, 24, 28, 25, 22, 10, 40, 26, 16, 27, 17, 7, 15, 5, 12, 2, 20, 6, 13, 1, 4, 8, 19, 9, 18, 14, 11, 3]
+DEAP_arousal_rating = [26, 22, 28, 16, 15, 12, 17, 23, 29, 21, 27, 13, 25, 18, 24, 40, 33, 20, 14, 30, 11, 8, 31, 6, 39, 10, 19, 1, 7, 37, 35, 9, 38, 34, 36, 4, 3, 5, 2, 32]
+
+# high 20 and low 20
+DEAP_half_valence_low = [38, 37, 35, 23, 30, 39, 29, 21, 31, 32, 33, 34, 36, 24, 28, 25, 22, 10, 40, 26]
+DEAP_half_valence_high = [16, 27, 17, 7, 15, 5, 12, 2, 20, 6, 13, 1, 4, 8, 19, 9, 18, 14, 11, 3]
+DEAP_half_arousal_low = [26, 22, 28, 16, 15, 12, 17, 23, 29, 21, 27, 13, 25, 18, 24, 40, 33, 20, 14, 30]
+DEAP_half_arousal_high = [11, 8, 31, 6, 39, 10, 19, 1, 7, 37, 35, 9, 38, 34, 36, 4, 3, 5, 2, 32]
+
+# high 10 and low 10
+DEAP_ten_valence_low = [38, 37, 35, 23, 30, 39, 29, 21, 31, 32]
+DEAP_ten_valence_high = [13, 1, 4, 8, 19, 9, 18, 14, 11, 3]
+DEAP_ten_arousal_low = [26, 22, 28, 16, 15, 12, 17, 23, 29, 21]
+DEAP_ten_arousal_high = [35, 9, 38, 34, 36, 4, 3, 5, 2, 32]
 
 # channel names mapping
 amigo_channel_mapping = {
