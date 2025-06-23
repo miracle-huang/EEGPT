@@ -305,7 +305,7 @@ class LitEEGPTCausal(pl.LightningModule):
 
         # 保存混淆矩阵和指标到文件
         os.makedirs("result", exist_ok=True)
-        with open(f"result/test_results_deap_{self.exp_name}_video{self.test_video_name}.txt", "w") as f:
+        with open(f"result/test_results/deap_{self.exp_name}_video{self.test_video_name}.txt", "w") as f:
             f.write("Confusion Matrix:\n")
             f.write(str(conf_matrix) + "\n\n")
             f.write(f"Test Accuracy: {accuracy:.4f}\n")
@@ -431,10 +431,10 @@ def run_deap(train_video_list, emotion_type, exp_name):
         # 创建测试集
         test_dataset = MatDataset(test_files, data_key, label_key, split="test")
 
-        # 创建 DataLoader
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
-        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
+        # 创建 DataLoader 在自己电脑上设置num_workers为更大的数字 否则设为0
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False, num_workers=2, pin_memory=True)
+        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=2, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=2, pin_memory=True)
 
         global steps_per_epoch
         steps_per_epoch = math.ceil(len(train_loader))
@@ -445,7 +445,7 @@ def run_deap(train_video_list, emotion_type, exp_name):
         print("Test dataset size:", len(test_dataset))
 
         # 初始化模型
-        model = LitEEGPTCausal(exp_name='exp_name', test_video_name=video_id, load_path="checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt")
+        model = LitEEGPTCausal(exp_name=exp_name, test_video_name=video_id, load_path="checkpoint/eegpt_mcae_58chs_4s_large4E.ckpt")
         # most basic trainer, uses good defaults (auto-tensorboard, checkpoints, logs, and more)
         # 设置回调函数
         lr_monitor = LearningRateMonitor(logging_interval='epoch')
@@ -508,6 +508,7 @@ if __name__ == "__main__":
     deap_half_arousal = config.DEAP_ten_arousal_low + config.DEAP_ten_arousal_high
 
     run_deap(config.DEAP_all_videos_list, "valence_labels", "all_valence")
+    run_deap(config.DEAP_all_videos_list, "arousal_labels", "all_arosual")
     run_deap(deap_half_valence, "valence_labels", "half_valence")
     run_deap(deap_half_arousal, "arousal_labels", "half_arousal")
 
